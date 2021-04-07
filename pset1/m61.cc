@@ -5,6 +5,29 @@
 #include <cstdio>
 #include <cinttypes>
 #include <cassert>
+#include <limits.h>
+#include <vector>
+#include <string.h>
+#include <map>
+
+struct metadata_node {
+    const char* file;
+    long line;
+    unsigned long long sz;
+};
+
+static std::map<uintptr_t, metadata_node*> metadata;
+static unsigned long long ntotal = 0;
+static unsigned long long nactive = 0;
+static unsigned long long active_size = 0;
+static unsigned long long total_size = 0;
+static unsigned long long fail_size = 0;
+static unsigned long long nfail = 0;
+static uintptr_t heap_min = LONG_MAX;
+static uintptr_t heap_max = 0;
+// TODO: check METASIZE is aligned
+static size_t METASIZE = sizeof(struct metadata_node) - 1;
+
 
 /// m61_malloc(sz, file, line)
 ///    Return a pointer to `sz` bytes of newly-allocated dynamic memory.
@@ -14,8 +37,33 @@
 
 void* m61_malloc(size_t sz, const char* file, long line) {
     (void) file, (void) line;   // avoid uninitialized variable warnings
+
+    void* memory = base_malloc(sz);
+    if (sz >= LONG_MAX || !memory) {
+        ++nfail;
+        fail_size += sz;
+        return nullptr;
+    }
+
+    uintptr_t uintptr_memory = (uintptr_t) memory;
+    ++ntotal;
+    ++nactive;
     // Your code here.
-    return base_malloc(sz);
+    total_size += sz;
+    active_size += sz;
+
+    metadata_node* meta = (struct metadata_node*) base_malloc(sizeof(struct metadata_node));
+    meta->line = line;
+    meta->file = file;
+    meta->sz = sz;
+    metadata.insert(std::pair<uintptr_t, metadata_node*>(uintptr_memory, meta));
+
+    if (uintptr_memory < heap_min)
+        heap_min = uintptr_memory;
+
+    if (uintptr_memory + sz > heap_max)
+        heap_max =  uintptr_memory + sz;
+    return memory;
 }
 
 
@@ -26,7 +74,18 @@ void* m61_malloc(size_t sz, const char* file, long line) {
 
 void m61_free(void* ptr, const char* file, long line) {
     (void) file, (void) line;   // avoid uninitialized variable warnings
+    if (!ptr) return;
     // Your code here.
+
+    --nactive;
+
+    uintptr_t uptr = (uintptr_t) ptr;
+    auto meta = metadata.find(uptr);
+    if (meta != metadata.end()) {
+        active_size -= meta->second->sz;
+        metadata.erase(meta);
+        base_free((void*) meta->second);
+    }
     base_free(ptr);
 }
 
@@ -53,8 +112,15 @@ void* m61_calloc(size_t nmemb, size_t sz, const char* file, long line) {
 
 void m61_get_statistics(m61_statistics* stats) {
     // Stub: set all statistics to enormous numbers
-    memset(stats, 255, sizeof(m61_statistics));
-    // Your code here.
+    // memset(stats, 255, sizeof(m61_statistics));
+	stats->nactive = nactive;
+	stats->active_size = active_size;
+	stats->total_size = total_size;
+	stats->fail_size = fail_size;
+    stats->nfail = nfail;
+    stats->ntotal = ntotal;
+    stats->heap_max = heap_max;
+    stats->heap_min = heap_min;
 }
 
 
