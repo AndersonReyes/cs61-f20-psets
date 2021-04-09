@@ -87,7 +87,7 @@ void m61_free(void* ptr, const char* file, long line) {
     uintptr_t uptr = (uintptr_t) ptr;
 
     if (free_list.find(uptr) != free_list.end()) {
-        printf("MEMORY BUG: invalid free of pointer %p, double free", ptr);
+        printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, double free", file, line, ptr);
         exit(-1);
     } else {
         auto meta = metadata.find(uptr);
@@ -100,10 +100,10 @@ void m61_free(void* ptr, const char* file, long line) {
             free_list.insert(uptr);
         } else {
             if (uptr < heap_min || uptr > heap_max) {
-                printf("MEMORY BUG: invalid free of pointer %p, not in heap", ptr);
+                printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not in heap", file, line, ptr);
                 exit(-1);
             } else {
-                printf("MEMORY BUG: invalid free of pointer %p, not allocated", ptr);
+                printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not allocated", file, line, ptr);
                 exit(-1);
             }
         }
