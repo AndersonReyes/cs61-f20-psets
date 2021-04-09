@@ -26,7 +26,7 @@ static unsigned long long nfail = 0;
 static uintptr_t heap_min = LONG_MAX;
 static uintptr_t heap_max = 0;
 // TODO: check METASIZE is aligned
-static size_t METASIZE = sizeof(struct metadata_node) - 1;
+// static size_t METASIZE = sizeof(struct metadata_node) - 1;
 
 
 /// m61_malloc(sz, file, line)
@@ -75,16 +75,20 @@ void* m61_malloc(size_t sz, const char* file, long line) {
 void m61_free(void* ptr, const char* file, long line) {
     (void) file, (void) line;   // avoid uninitialized variable warnings
     if (!ptr) return;
-    // Your code here.
-
-    --nactive;
 
     uintptr_t uptr = (uintptr_t) ptr;
     auto meta = metadata.find(uptr);
+
     if (meta != metadata.end()) {
+        --nactive;
         active_size -= meta->second->sz;
         metadata.erase(meta);
         base_free((void*) meta->second);
+    } else {
+        // TODO: panic because the ptr we trying to free was not allocated by u s
+        printf("MEMORY BUG: invalid free of pointer %p, not in heap", ptr);
+        exit(-1);
+        return;
     }
     base_free(ptr);
 }
@@ -99,9 +103,17 @@ void m61_free(void* ptr, const char* file, long line) {
 
 void* m61_calloc(size_t nmemb, size_t sz, const char* file, long line) {
     // Your code here (to fix test019).
-    void* ptr = m61_malloc(nmemb * sz, file, line);
+    size_t total = nmemb * sz;
+    // detect overflow
+    if (nmemb != 0 && (total / nmemb) != sz) {
+        ++nfail;
+        fail_size += sz;
+        return nullptr;
+    }
+
+    void* ptr = m61_malloc(total, file, line);
     if (ptr) {
-        memset(ptr, 0, nmemb * sz);
+        memset(ptr, 0, total);
     }
     return ptr;
 }
