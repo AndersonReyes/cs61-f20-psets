@@ -9,6 +9,7 @@
 #include <vector>
 #include <string.h>
 #include <map>
+#include <set>
 
 struct metadata_node {
     const char* file;
@@ -17,6 +18,7 @@ struct metadata_node {
 };
 
 static std::map<uintptr_t, metadata_node*> metadata;
+static std::set<uintptr_t> free_list;
 static unsigned long long ntotal = 0;
 static unsigned long long nactive = 0;
 static unsigned long long active_size = 0;
@@ -46,6 +48,12 @@ void* m61_malloc(size_t sz, const char* file, long line) {
     }
 
     uintptr_t uintptr_memory = (uintptr_t) memory;
+
+    // Check if its in the free list and clear for reuse if it is
+    if (free_list.find(uintptr_memory) != free_list.end()) {
+        free_list.erase(uintptr_memory);
+    }
+
     ++ntotal;
     ++nactive;
     // Your code here.
@@ -77,18 +85,28 @@ void m61_free(void* ptr, const char* file, long line) {
     if (!ptr) return;
 
     uintptr_t uptr = (uintptr_t) ptr;
-    auto meta = metadata.find(uptr);
 
-    if (meta != metadata.end()) {
-        --nactive;
-        active_size -= meta->second->sz;
-        metadata.erase(meta);
-        base_free((void*) meta->second);
-    } else {
-        // TODO: panic because the ptr we trying to free was not allocated by u s
-        printf("MEMORY BUG: invalid free of pointer %p, not in heap", ptr);
+    if (free_list.find(uptr) != free_list.end()) {
+        printf("MEMORY BUG: invalid free of pointer %p, double free", ptr);
         exit(-1);
-        return;
+    } else {
+        auto meta = metadata.find(uptr);
+        if (meta != metadata.end()) {
+            --nactive;
+            active_size -= meta->second->sz;
+            metadata.erase(meta);
+            base_free((void*) meta->second);
+            meta->second = nullptr;
+            free_list.insert(uptr);
+        } else {
+            if (uptr < heap_min || uptr > heap_max) {
+                printf("MEMORY BUG: invalid free of pointer %p, not in heap", ptr);
+                exit(-1);
+            } else {
+                printf("MEMORY BUG: invalid free of pointer %p, not allocated", ptr);
+                exit(-1);
+            }
+        }
     }
     base_free(ptr);
 }
