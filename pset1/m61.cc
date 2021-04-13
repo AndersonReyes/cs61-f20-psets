@@ -194,6 +194,9 @@ void m61_print_statistics() {
 
 void m61_print_leak_report() {
     // Your code here.
+    for(auto iter = metadata.begin(); iter != metadata.end(); ++iter) {
+        printf("LEAK CHECK: %s:%lu: allocated object %p with size %llu\n", iter->second->file, iter->second->line, (void*)(iter->first), iter->second->sz);
+    }
 }
 
 
