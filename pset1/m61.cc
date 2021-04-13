@@ -1,4 +1,5 @@
 #define M61_DISABLE 1
+
 #include "m61.hh"
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +18,7 @@ struct metadata_node {
     unsigned long long sz;
 };
 
+
 static std::map<uintptr_t, metadata_node*> metadata;
 static std::set<uintptr_t> free_list;
 static unsigned long long ntotal = 0;
@@ -27,8 +29,8 @@ static unsigned long long fail_size = 0;
 static unsigned long long nfail = 0;
 static uintptr_t heap_min = LONG_MAX;
 static uintptr_t heap_max = 0;
-// TODO: check METASIZE is aligned
-// static size_t METASIZE = sizeof(struct metadata_node) - 1;
+static int BOUNDARY_CHECK = 0xBADBEEF;
+static size_t BOUNDARY_CHECK_SIZE = sizeof(int);
 
 
 /// m61_malloc(sz, file, line)
@@ -40,8 +42,15 @@ static uintptr_t heap_max = 0;
 void* m61_malloc(size_t sz, const char* file, long line) {
     (void) file, (void) line;   // avoid uninitialized variable warnings
 
-    void* memory = base_malloc(sz);
-    if (sz >= LONG_MAX || !memory) {
+    if (sz >= (ULONG_MAX - BOUNDARY_CHECK_SIZE)) {
+        ++nfail;
+        fail_size += sz;
+        return nullptr;
+    }
+
+    void* memory = base_malloc(sz + BOUNDARY_CHECK_SIZE);
+
+    if (!memory) {
         ++nfail;
         fail_size += sz;
         return nullptr;
@@ -53,6 +62,10 @@ void* m61_malloc(size_t sz, const char* file, long line) {
     if (free_list.find(uintptr_memory) != free_list.end()) {
         free_list.erase(uintptr_memory);
     }
+
+    // Write boundary check
+    int* temp = (int*)(uintptr_memory + sz);
+    temp[0] = BOUNDARY_CHECK;
 
     ++ntotal;
     ++nactive;
@@ -89,23 +102,30 @@ void m61_free(void* ptr, const char* file, long line) {
     if (free_list.find(uptr) != free_list.end()) {
         printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, double free", file, line, ptr);
         exit(-1);
+    }
+
+    auto meta = metadata.find(uptr);
+    if (meta != metadata.end()) {
+        // Wild write check
+        int* temp = (int*)(uptr + meta->second->sz);
+        if (temp[0] != BOUNDARY_CHECK) {
+            printf("MEMORY BUG: %s:%lu: detected wild write during free of pointer %p", file, line, ptr);
+            exit(-1);
+        }
+
+        --nactive;
+        active_size -= meta->second->sz;
+        metadata.erase(meta);
+        base_free((void*) meta->second);
+        meta->second = nullptr;
+        free_list.insert(uptr);
     } else {
-        auto meta = metadata.find(uptr);
-        if (meta != metadata.end()) {
-            --nactive;
-            active_size -= meta->second->sz;
-            metadata.erase(meta);
-            base_free((void*) meta->second);
-            meta->second = nullptr;
-            free_list.insert(uptr);
+        if (uptr < heap_min || uptr > heap_max) {
+            printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not in heap", file, line, ptr);
+            exit(-1);
         } else {
-            if (uptr < heap_min || uptr > heap_max) {
-                printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not in heap", file, line, ptr);
-                exit(-1);
-            } else {
-                printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not allocated", file, line, ptr);
-                exit(-1);
-            }
+            printf("MEMORY BUG: %s:%lu: invalid free of pointer %p, not allocated", file, line, ptr);
+            exit(-1);
         }
     }
     base_free(ptr);
